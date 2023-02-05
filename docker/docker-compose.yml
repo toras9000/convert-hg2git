@@ -1,0 +1,19 @@
+version: '3.5'
+services:
+  app:
+    image: my/fast-export:latest
+    build:
+      context: ./build
+      args:
+        - TARGET_BRANCH=v221024
+      x-bake:
+        tags:
+          - registry.toras.home/toras/fast-export:v221024
+          - registry.toras.home/toras/fast-export:latest
+          - toras9000/fast-export:20230111
+          - toras9000/fast-export:latest
+        platforms:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+        pull: true
