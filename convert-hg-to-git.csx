@@ -1,5 +1,6 @@
 #nullable enable
 #r "nuget: Docker.DotNet, 3.125.12"
+#r "nuget: Kurukuru, 1.4.2"
 #r "nuget: Lestaly, 0.29.0"
 using System.Formats.Tar;
 using System.Runtime.InteropServices;
@@ -9,6 +10,7 @@ using System.Threading;
 using CommandLine;
 using Docker.DotNet;
 using Docker.DotNet.Models;
+using Kurukuru;
 using Lestaly;
 
 // Docker イメージを使って Mercurial リポジトリを git リポジトリに変換する。
@@ -83,6 +85,9 @@ record ContainerContext(DockerClient Client, string ContainerId)
 // メイン処理
 return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =>
 {
+    // 出力エンコーディングを設定
+    using var outenc = ConsoleWig.OutputEncodingPeriod(Encoding.UTF8);
+
     // コマンドライン引数をパース
     var options = CliArgs.Parse<Options>(Args);
 
@@ -137,8 +142,11 @@ return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =
     };
 
     // Docker クライアントオブジェクト正生成
-    Console.WriteLine("Docker アクセス準備 ...");
-    using var client = new DockerClientConfiguration().CreateClient();
+    using var client = await Spinner.StartAsync("Docker アクセス準備 ...", async spinner =>
+    {
+        await Task.CompletedTask;
+        return new DockerClientConfiguration().CreateClient();
+    });
 
     // イメージが存在するかチェック
     var image = await Try.FuncOrDefaultAsync(() => client.Images.InspectImageAsync(settings.ImageName, canceller.Token));
@@ -146,33 +154,41 @@ return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =
     {
         // 自動ビルド無効にしていなければイメージをビルド
         if (!settings.ImageAutoBuild) throw new PavedMessageException($"イメージが存在しません。");
-        Console.WriteLine("イメージをビルド ...");
-        // ビルド資材を tar にアーカイブ
-        var buildFile = ThisSource.GetRelativeDirectory(settings.ImageBuildContext).GetRelativeFile("Dockerfile");
-        using var contentsTar = new MemoryStream();
-        using var writer = new TarWriter(contentsTar);
-        writer.WriteEntry(buildFile.FullName, buildFile.Name);
-        contentsTar.Seek(0, SeekOrigin.Begin);
-        // ビルド実行
-        var emptyObserver = new Progress<JSONMessage>();
-        var buildParam = new ImageBuildParameters();
-        buildParam.Dockerfile = buildFile.Name;
-        buildParam.Tags = new[] { settings.ImageName };
-        buildParam.BuildArgs = new Dictionary<string, string> { ["TARGET_BRANCH"] = settings.ImageBuildArgBranch, };
-        await client.Images.BuildImageFromDockerfileAsync(buildParam, contentsTar, null, null, emptyObserver, canceller.Token);
+        await Spinner.StartAsync("イメージをビルド ...", async spinner =>
+        {
+            // 実行時間の目安のために経過秒数を表示
+            var caption = spinner.Text;
+            var watch = Stopwatch.StartNew();
+            using var timer = new Timer(_ => spinner.Text = $"{caption} {watch.ElapsedMilliseconds / 1000} seconds", null, 0, 400);
+            // ビルド資材を tar にアーカイブ
+            var buildFile = ThisSource.GetRelativeDirectory(settings.ImageBuildContext).GetRelativeFile("Dockerfile");
+            using var contentsTar = new MemoryStream();
+            using var writer = new TarWriter(contentsTar);
+            writer.WriteEntry(buildFile.FullName, buildFile.Name);
+            contentsTar.Seek(0, SeekOrigin.Begin);
+            // ビルド実行
+            var emptyObserver = new Progress<JSONMessage>();
+            var buildParam = new ImageBuildParameters();
+            buildParam.Dockerfile = buildFile.Name;
+            buildParam.Tags = new[] { settings.ImageName };
+            buildParam.BuildArgs = new Dictionary<string, string> { ["TARGET_BRANCH"] = settings.ImageBuildArgBranch, };
+            await client.Images.BuildImageFromDockerfileAsync(buildParam, contentsTar, null, null, emptyObserver, canceller.Token);
+        });
     }
 
     // 実行用 Docker コンテナ開始
-    Console.WriteLine("fast-export コンテナの起動 ...");
-    var parameter = new CreateContainerParameters();
-    parameter.Image = settings.ImageName;
-    parameter.Tty = true;
-    parameter.HostConfig = new HostConfig();
-    parameter.HostConfig.Mounts = new List<Mount>();
-    parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = repoDir.FullName, Target = containerFs.MercurialRepo, ReadOnly = true, });
-    parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = gitDir.FullName, Target = containerFs.GitRepo, });
-    parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = tmpDir.Info.FullName, Target = containerFs.DataDir, });
-    var container = await client.Containers.CreateContainerAsync(parameter, canceller.Token);
+    var container = await Spinner.StartAsync("fast-export コンテナの起動 ...", async spinner =>
+    {
+        var parameter = new CreateContainerParameters();
+        parameter.Image = settings.ImageName;
+        parameter.Tty = true;
+        parameter.HostConfig = new HostConfig();
+        parameter.HostConfig.Mounts = new List<Mount>();
+        parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = repoDir.FullName, Target = containerFs.MercurialRepo, ReadOnly = true, });
+        parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = gitDir.FullName, Target = containerFs.GitRepo, });
+        parameter.HostConfig.Mounts.Add(new() { Type = "bind", Source = tmpDir.Info.FullName, Target = containerFs.DataDir, });
+        return await client.Containers.CreateContainerAsync(parameter, canceller.Token);
+    });
 
     // 変換処理
     var convExecuted = false;
@@ -186,10 +202,12 @@ return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =
         var context = new ContainerContext(client, container.ID);
 
         // mercurial リポジトリのコミット作者名を取得
-        Console.WriteLine("Mercurial リポジトリのコミット作者情報取得 ...");
-        var authorResult = await context.ExecAsync(new[] { "hg", "--repository", containerFs.MercurialRepo, "log", "--template", @"{author}\n", }, cancelToken: canceller.Token);
-        if (authorResult.code != 0) throw new PavedMessageException($"Mercurial リポジトリの情報を取得できません。");
-        var authors = authorResult.stdout;
+        var authors = await Spinner.StartAsync("Mercurial リポジトリのコミット作者情報取得 ...", async spinner =>
+        {
+            var authorResult = await context.ExecAsync(new[] { "hg", "--repository", containerFs.MercurialRepo, "log", "--template", @"{author}\n", }, cancelToken: canceller.Token);
+            if (authorResult.code != 0) throw new PavedMessageException($"Mercurial リポジトリの情報を取得できません。");
+            return authorResult.stdout;
+        });
 
         // 作者マッピングファイルを作成
         var authorPat = new Regex(@"^.+<.+>\s*$");
@@ -217,44 +235,59 @@ return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =
             authorEditFile.CopyTo(cwdEditFile.FullName);
             // 編集・リネームを待機する。
             Console.WriteLine($"カレントディレクトリに生成された '{cwdEditFile.Name}' を編集し、完了したら '{cwdMapFile.Name}' にリネームしてください。");
-            while (cwdEditFile.Exists) { cwdEditFile.Refresh(); await Task.Delay(100, canceller.Token); }  // 編集ファイルが無くなるのを待って、
-            while (!cwdMapFile.Exists) { cwdMapFile.Refresh(); await Task.Delay(100, canceller.Token); }  // リネーム後ファイルが出来るのを待つ。
-            // 変換処理に指定するための場所に移動
-            cwdMapFile.MoveTo(authorMapFile.FullName);
+            await Spinner.StartAsync("編集完了を待機中 ...", pattern: Patterns.SimpleDots, action: async spinner =>
+            {
+                while (cwdEditFile.Exists) { cwdEditFile.Refresh(); await Task.Delay(100, canceller.Token); }   // 編集ファイルが無くなるのを待って、
+                while (!cwdMapFile.Exists) { cwdMapFile.Refresh(); await Task.Delay(100, canceller.Token); }    // リネーム後ファイルが出来るのを待つ。
+                // 変換処理に指定するための場所に移動
+                cwdMapFile.MoveTo(authorMapFile.FullName);
+            });
         }
         else
         {
             Console.WriteLine("関連付けによってエディタで作者名マッピングファイルが開かれます。\n必要な更新を行ってエディタを終了してください。");
-            // エディタが終了するのを待機
-            using var editor = Process.Start(new ProcessStartInfo(authorEditFile.FullName) { UseShellExecute = true, }) ?? throw new PavedMessageException("エディタを開けません。");
-            var sw = Stopwatch.StartNew();
-            await editor.WaitForExitAsync(canceller.Token);
-            // 終了が早すぎるようであれば異常とみなす
-            // 単一プロセス型のエディタで、起動済みプロセスに情報を渡してすぐに終了するような場合には待機できないのでそれはサポートできない。
-            if (sw.ElapsedMilliseconds < 100) throw new PavedMessageException("関連付けられたエディタプロセスが即時終了しました。この環境では自動処理ができません。");
-            // 変換処理に指定するためのファイル名にリネーム
-            authorEditFile.MoveTo(authorMapFile.FullName);
+            await Spinner.StartAsync("編集完了を待機中 ...", pattern: Patterns.SimpleDots, action: async spinner =>
+            {
+                // エディタが終了するのを待機
+                using var editor = Process.Start(new ProcessStartInfo(authorEditFile.FullName) { UseShellExecute = true, }) ?? throw new PavedMessageException("エディタを開けません。");
+                var sw = Stopwatch.StartNew();
+                await editor.WaitForExitAsync(canceller.Token);
+                // 終了が早すぎるようであれば異常とみなす
+                // 単一プロセス型のエディタで、起動済みプロセスに情報を渡してすぐに終了するような場合には待機できないのでそれはサポートできない。
+                if (sw.ElapsedMilliseconds < 100) throw new PavedMessageException("関連付けられたエディタプロセスが即時終了しました。この環境では自動処理ができません。");
+                // 変換処理に指定するためのファイル名にリネーム
+                authorEditFile.MoveTo(authorMapFile.FullName);
+            });
         }
 
         // git リポジトリを作成
         Console.WriteLine();
-        Console.WriteLine("Gitリポジトリ初期化 ...");
-        var gitInitResult = await context.ExecAsync(new[] { "git", "init", }, workDir: containerFs.GitRepo, canceller.Token);
-        if (gitInitResult.code != 0) throw new PavedMessageException($"Git リポジトリを初期化できません。");
-        var gitConfigResult = await context.ExecAsync(new[] { "git", "config", "core.ignoreCase", "false", }, workDir: containerFs.GitRepo, canceller.Token);
-        if (gitConfigResult.code != 0) throw new PavedMessageException($"Git リポジトリを構成できません。");
+        await Spinner.StartAsync("Gitリポジトリ初期化 ...", async spinner =>
+        {
+            var gitInitResult = await context.ExecAsync(new[] { "git", "init", }, workDir: containerFs.GitRepo, canceller.Token);
+            if (gitInitResult.code != 0) throw new PavedMessageException($"Git リポジトリを初期化できません。");
+            var gitConfigResult = await context.ExecAsync(new[] { "git", "config", "core.ignoreCase", "false", }, workDir: containerFs.GitRepo, canceller.Token);
+            if (gitConfigResult.code != 0) throw new PavedMessageException($"Git リポジトリを構成できません。");
+        });
 
         // 変換スクリプトの呼び出し
-        Console.WriteLine($"リポジトリ変換 to {gitDir.Name} ...");
-        var cmdLine = new List<string>()
+        var convResult = await Spinner.StartAsync($"リポジトリ変換 to {gitDir.Name} ...", async spinner =>
         {
-            "bash", containerFs.FastExport,
-            "-r", containerFs.MercurialRepo,
-            "-A", $"{containerFs.DataDir}/{authorMapFile.Name}",
-        };
-        if (useMbcs) cmdLine.AddRange(new[] { "--fe", fileEnc, });
-        if (useForce) cmdLine.Add("--force");
-        var convResult = await context.ExecAsync(cmdLine, workDir: containerFs.GitRepo, canceller.Token);
+            // 実行時間の目安のために経過秒数を表示
+            var caption = spinner.Text;
+            var watch = Stopwatch.StartNew();
+            using var timer = new Timer(_ => spinner.Text = $"{caption} {watch.ElapsedMilliseconds / 1000} seconds", null, 0, 400);
+            // 変換プロセス実行
+            var cmdLine = new List<string>()
+            {
+                "bash", containerFs.FastExport,
+                "-r", containerFs.MercurialRepo,
+                "-A", $"{containerFs.DataDir}/{authorMapFile.Name}",
+            };
+            if (useMbcs) cmdLine.AddRange(new[] { "--fe", fileEnc, });
+            if (useForce) cmdLine.Add("--force");
+            return await context.ExecAsync(cmdLine, workDir: containerFs.GitRepo, canceller.Token);
+        });
 
         // ここまできたらリポジトリのクリーンナップしないでおくためにフラグ立て
         convExecuted = true;
