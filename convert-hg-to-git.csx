@@ -14,7 +14,8 @@ using Kurukuru;
 using Lestaly;
 
 // Docker イメージを使って Mercurial リポジトリを git リポジトリに変換する。
-// なお、主に Docker.DotNet の利用方法把握を目的として作成したので、おそらく docker-compose をコマンド呼び出しするほうが楽に作れそう。
+// なお、主に Docker.DotNet の利用方法把握を目的として作成したので docker を扱うコードが多少煩雑になっている。
+// おそらく docker-compose をコマンド呼び出しするほうが楽に作れそう。
 
 // コマンドラインパラメータをマッピングする型
 class Options
@@ -47,9 +48,6 @@ class Options
 // スクリプトの設定
 var settings = new
 {
-    // fast-export のイメージ名
-    ImageName = "my/fast-export:latest",
-
     // デフォルト設定：win32mbcs が使われていた場合のファイル名エンコーディング
     DefaultMbcsEncoding = "cp932",
 
@@ -58,6 +56,12 @@ var settings = new
 
     // デフォルト設定：作者名マッピングファイルをコピーして残すか否か
     DefaultCopyAuthorMap = false,
+
+    // 処理完了時に一時停止するか否か。
+    NoPause = false,
+
+    // fast-export のイメージ名
+    ImageName = "my/fast-export:latest",
 
     // イメージが存在しない場合に自動ビルドするか否か
     ImageAutoBuild = true,
@@ -95,7 +99,7 @@ record ContainerContext(DockerClient Client, string ContainerId)
 }
 
 // メイン処理
-return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =>
+return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? o.NoPause() : o.AnyPause()), action: async () =>
 {
     // 出力エンコーディングを設定
     using var outenc = ConsoleWig.OutputEncodingPeriod(Encoding.UTF8);
