@@ -17,3 +17,4 @@ services:
           - linux/arm64
           - linux/arm/v7
         pull: true
+    network_mode: "none"
