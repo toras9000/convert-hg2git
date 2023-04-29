@@ -32,6 +32,9 @@ class Options
     [Option('m', "win32mbcs", HelpText = "リポジトリで win32mbcs を使用していたか否か")]
     public bool? UseMbcs { get; set; }
 
+    [Option('d', "default-branch", HelpText = "default ブランチの変換後ブランチ名")]
+    public string? DefaultBranchName { get; set; }
+
     [Option('e', "file-enc", HelpText = "リポジトリで win32mbcs を使用していた場合のファイル名エンコーディング")]
     public string? MbcsEncoding { get; set; }
 
@@ -50,6 +53,9 @@ var settings = new
 {
     // デフォルト設定：win32mbcs が使われていた場合のファイル名エンコーディング
     DefaultMbcsEncoding = "cp932",
+
+    // デフォルト設定：Mercurial リポジトリ default ブランチの変換後ブランチ名
+    DefaultBranchName = "main",
 
     // デフォルト設定：作者名マッピングの手動リネームモード
     DefaultManualRename = false,
@@ -139,6 +145,9 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
     var useMbcs = options.UseMbcs
         ?? ConsoleWig.ReadLine("【重要】Mercurial リポジトリで win32mbcs が有効でしたか？(yes or no)\n>") switch
         { "y" => true, "yes" => true, "n" => false, "no" => false, _ => throw new PavedMessageException("win32mbcs の利用状況を特定できません。"), };
+
+    // Mercurial リポジトリ default ブランチの変換後ブランチ名
+    var defBranch = options.DefaultBranchName.OmitWhite() ?? settings.DefaultBranchName;
 
     // ファイル名エンコーディングの決定
     var fileEnc = options.MbcsEncoding.OmitWhite() ?? settings.DefaultMbcsEncoding;
@@ -308,7 +317,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
         Console.WriteLine();
         await Spinner.StartAsync("Gitリポジトリ初期化 ...", async spinner =>
         {
-            var gitInitResult = await context.ExecAsync(new[] { "git", "init", }, workDir: containerFs.GitRepo, canceller.Token);
+            var gitInitResult = await context.ExecAsync(new[] { "git", "init", "--initial-branch", defBranch, }, workDir: containerFs.GitRepo, canceller.Token);
             if (gitInitResult.code != 0) throw new PavedMessageException($"Git リポジトリを初期化できません。");
             var gitConfigResult = await context.ExecAsync(new[] { "git", "config", "core.ignoreCase", "false", }, workDir: containerFs.GitRepo, canceller.Token);
             if (gitConfigResult.code != 0) throw new PavedMessageException($"Git リポジトリを構成できません。");
@@ -327,6 +336,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
                 "bash", containerFs.FastExport,
                 "-r", containerFs.MercurialRepo,
                 "-A", $"{containerFs.DataDir}/{authorMapFile.Name}",
+                "-M", defBranch,
             };
             if (useMbcs) cmdLine.AddRange(new[] { "--fe", fileEnc, });
             if (useForce) cmdLine.Add("--force");
