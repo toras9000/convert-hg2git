@@ -1,7 +1,7 @@
 #nullable enable
-#r "nuget: Docker.DotNet, 3.125.12"
+#r "nuget: Docker.DotNet, 3.125.14"
 #r "nuget: Kurukuru, 1.4.2"
-#r "nuget: Lestaly, 0.29.0"
+#r "nuget: Lestaly, 0.36.0"
 using System.Formats.Tar;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -114,15 +114,15 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
     var options = CliArgs.Parse<Options>(Args);
 
     // 対象ディレクトリの確定。引数指定が無ければ入力させる。
-    var repoPath = options.Target.OmitWhite() ?? ConsoleWig.ReadLine("対象リポジトリ\n>");
-    var repoDir = CurrentDir.GetRelativeDirectory(repoPath.CancelIfWhite());
+    var repoPath = options.Target.OmitWhite() ?? ConsoleWig.Write("対象リポジトリ\n>").ReadLine();
+    var repoDir = CurrentDir.RelativeDirectory(repoPath.CancelIfWhite());
 
     // 対象ディレクトリの検証
-    if (!repoDir.GetRelativeDirectory(".hg").Exists) throw new PavedMessageException("指定されたパスが mercurial リポジトリではありません。");
+    if (!repoDir.RelativeDirectory(".hg").Exists) throw new PavedMessageException("指定されたパスが mercurial リポジトリではありません。");
 
     // 出力ディレクトリを決定
     var outPath = options.OutDir.OmitWhite() ?? repoDir.Parent?.FullName ?? throw new PavedMessageException("出力ディレクトリを決定できません。");
-    var outDir = CurrentDir.GetRelativeDirectory(outPath).WithCreate();
+    var outDir = CurrentDir.RelativeDirectory(outPath).WithCreate();
 
     // 作者名マッピングファイルをコピーして残すかどうか
     var copyAuthorsMap = options.CopyAuthorMap ?? settings.DefaultCopyAuthorMap;
@@ -138,12 +138,12 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
 
     // 出力先ディレクトリの存在チェック
     // 増分変換も可能らしいが、このスクリプトでは新規変換だけをサポートすることにする。(現代の状況的に mercurial はもう使わないでほしいので。)
-    var gitDir = outDir.GetRelativeDirectory($"{repoDir.Name}-git-{timestamp}");
+    var gitDir = outDir.RelativeDirectory($"{repoDir.Name}-git-{timestamp}");
     if (gitDir.Exists) throw new PavedMessageException($"変換先ディレクトリが既に存在するため処理を中止します。\n  Path='{gitDir.FullName}'");
 
     // win32mbcs の利用が明示的に指定されていなければ問う
     var useMbcs = options.UseMbcs
-        ?? ConsoleWig.ReadLine("【重要】Mercurial リポジトリで win32mbcs が有効でしたか？(yes or no)\n>") switch
+        ?? ConsoleWig.Write("【重要】Mercurial リポジトリで win32mbcs が有効でしたか？(yes or no)\n>").ReadLine() switch
         { "y" => true, "yes" => true, "n" => false, "no" => false, _ => throw new PavedMessageException("win32mbcs の利用状況を特定できません。"), };
 
     // Mercurial リポジトリ default ブランチの変換後ブランチ名
@@ -154,7 +154,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
 
     // 強制実行フラグが明示的に指定されていなければ問う
     var useForce = options.Force
-        ?? ConsoleWig.ReadLine("強制実行を行いますか？(利用する場合は yes)\n>") switch { "y" => true, "yes" => true, _ => false, };
+        ?? ConsoleWig.Write("強制実行を行いますか？(利用する場合は yes)\n>").ReadLine() switch { "y" => true, "yes" => true, _ => false, };
 
     // キャンセルキーハンドラ
     using var canceller = new CancellationTokenSource();
@@ -195,7 +195,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
             var watch = Stopwatch.StartNew();
             using var timer = new Timer(_ => spinner.Text = $"{caption} {watch.ElapsedMilliseconds / 1000} seconds", null, 0, 400);
             // ビルド資材を tar にアーカイブ
-            var buildFile = ThisSource.GetRelativeDirectory(settings.ImageBuildContext).GetRelativeFile("Dockerfile");
+            var buildFile = ThisSource.RelativeDirectory(settings.ImageBuildContext).RelativeFile("Dockerfile");
             using var contentsTar = new MemoryStream();
             using var writer = new TarWriter(contentsTar);
             writer.WriteEntry(buildFile.FullName, buildFile.Name);
@@ -236,13 +236,13 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
         var context = new ContainerContext(client, container.ID);
 
         // 変換処理で使う作者名マッピングファイル情報。この後の処理でこのパスに準備する。
-        var authorMapFile = tmpDir.Info.GetRelativeFile($"authors.txt");
+        var authorMapFile = tmpDir.Info.RelativeFile($"authors.txt");
 
         // 作者名マッピングファイルを準備する。
         if (usingAuthorMap.IsNotWhite())
         {
             // 利用する作者名マッピングファイルが指定されている場合はそれを利用する。
-            CurrentDir.GetRelativeFile(usingAuthorMap).CopyTo(authorMapFile.FullName);
+            CurrentDir.RelativeFile(usingAuthorMap).CopyTo(authorMapFile.FullName);
         }
         else
         {
@@ -257,7 +257,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
 
             // 作者マッピングファイルを作成
             var authorPat = new Regex(@"^.+<.+>\s*$");
-            var authorEditFile = tmpDir.Info.GetRelativeFile($"authors-edit_{timestamp}.txt");
+            var authorEditFile = tmpDir.Info.RelativeFile($"authors-edit_{timestamp}.txt");
             using (var authorsWriter = authorEditFile.CreateTextWriter(encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
             {
                 foreach (var hgAuthor in authors.AsTextLines().Distinct().DropWhite())
@@ -275,8 +275,8 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
             if (manualAuthorRename)
             {
                 // 手動リネームモードの場合、マッピングファイルをカレントディレクトリに持ってくる。
-                var cwdMapFile = CurrentDir.GetRelativeFile(authorMapFile.Name).ThrowIfExists(i => new PavedMessageException($"'{i.Name}' が既に存在するため処理継続できません。"));
-                var cwdEditFile = CurrentDir.GetRelativeFile("authors-edit.txt").ThrowIfExists(i => new PavedMessageException($"'{i.Name}' が既に存在するため処理継続できません。"));
+                var cwdMapFile = CurrentDir.RelativeFile(authorMapFile.Name).ThrowIfExists(i => new PavedMessageException($"'{i.Name}' が既に存在するため処理継続できません。"));
+                var cwdEditFile = CurrentDir.RelativeFile("authors-edit.txt").ThrowIfExists(i => new PavedMessageException($"'{i.Name}' が既に存在するため処理継続できません。"));
                 authorEditFile.CopyTo(cwdEditFile.FullName);
                 // 編集・リネームを待機する。
                 Console.WriteLine($"カレントディレクトリに生成された '{cwdEditFile.Name}' を編集し、完了したら '{cwdMapFile.Name}' にリネームしてください。");
@@ -308,7 +308,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
             // 作者名マッピングファイルを残す設定の場合、コピーする。
             if (copyAuthorsMap)
             {
-                var usingAuthorFile = CurrentDir.GetRelativeFile($"authors_{timestamp}.txt");
+                var usingAuthorFile = CurrentDir.RelativeFile($"authors_{timestamp}.txt");
                 authorMapFile.CopyTo(usingAuthorFile.FullName);
             }
         }
@@ -347,7 +347,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
         convExecuted = true;
 
         // ログ保存
-        using (var logWriter = ThisSource.GetRelativeFile($"log_{timestamp}.txt").CreateTextWriter())
+        using (var logWriter = ThisSource.RelativeFile($"log_{timestamp}.txt").CreateTextWriter())
         {
             if (convResult.stdout.IsNotEmpty())
             {
