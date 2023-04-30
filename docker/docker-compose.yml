@@ -1,7 +1,7 @@
 version: '3.5'
 services:
   app:
-    image: my/fast-export:latest
+    image: toras9000/fast-export:latest
     build:
       context: ./build
       args:

@@ -67,7 +67,7 @@ var settings = new
     NoPause = false,
 
     // fast-export のイメージ名
-    ImageName = "my/fast-export:latest",
+    ImageName = "toras9000/fast-export:latest",
 
     // イメージが存在しない場合に自動ビルドするか否か
     ImageAutoBuild = true,
