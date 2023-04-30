@@ -1,7 +1,7 @@
 #nullable enable
 #r "nuget: Docker.DotNet, 3.125.14"
 #r "nuget: Kurukuru, 1.4.2"
-#r "nuget: Lestaly, 0.36.0"
+#r "nuget: Lestaly, 0.37.0"
 using System.Formats.Tar;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -114,8 +114,8 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
     var options = CliArgs.Parse<Options>(Args);
 
     // 対象ディレクトリの確定。引数指定が無ければ入力させる。
-    var repoPath = options.Target.OmitWhite() ?? ConsoleWig.Write("対象リポジトリ\n>").ReadLine();
-    var repoDir = CurrentDir.RelativeDirectory(repoPath.CancelIfWhite());
+    var repoPath = options.Target.OmitWhite() ?? ConsoleWig.Write("対象リポジトリ\n>").ReadLine().CancelIfWhite();
+    var repoDir = CurrentDir.RelativeDirectory(repoPath);
 
     // 対象ディレクトリの検証
     if (!repoDir.RelativeDirectory(".hg").Exists) throw new PavedMessageException("指定されたパスが mercurial リポジトリではありません。");
@@ -158,7 +158,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
 
     // キャンセルキーハンドラ
     using var canceller = new CancellationTokenSource();
-    using var sigHandlre = ConsoleWig.CancelKeyHandlePeriod(canceller);
+    using var handler = ConsoleWig.CancelKeyHandlePeriod(canceller);
 
     // 作業用一時ディレクトリ作成
     using var tmpDir = new TempDir();
@@ -347,7 +347,7 @@ return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? 
         convExecuted = true;
 
         // ログ保存
-        using (var logWriter = ThisSource.RelativeFile($"log_{timestamp}.txt").CreateTextWriter())
+        using (var logWriter = CurrentDir.RelativeFile($"log_{timestamp}.txt").CreateTextWriter())
         {
             if (convResult.stdout.IsNotEmpty())
             {
