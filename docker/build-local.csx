@@ -1,7 +1,6 @@
 #nullable enable
-#r "nuget: ProcessX, 1.5.5"
-#r "nuget: Lestaly, 0.29.0"
-using Zx;
+#r "nuget: Lestaly, 0.37.0"
+using System.Threading;
 using Lestaly;
 
 // ローカル環境にイメージをビルドするスクリプト。
@@ -9,6 +8,9 @@ using Lestaly;
 
 return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =>
 {
-    var composeFile = ThisSource.GetRelativeFile("docker-compose.yml");
-    await $"docker compose --file \"{composeFile.FullName}\" build";
+    using var canceller = new CancellationTokenSource();
+    using var handler = ConsoleWig.CancelKeyHandlePeriod(canceller);
+
+    var composeFile = ThisSource.RelativeFile("docker-compose.yml");
+    await CmdProc.ExecAsync("docker", new[] { "compose", "--file", composeFile.FullName, "build", }, canceller.Token, stdOutWriter: Console.Out).AsSuccessCode();
 });
