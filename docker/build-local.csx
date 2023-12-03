@@ -1,16 +1,16 @@
 #nullable enable
-#r "nuget: Lestaly, 0.37.0"
+#r "nuget: Lestaly, 0.51.0"
 using System.Threading;
 using Lestaly;
+using Lestaly.Cx;
 
 // ローカル環境にイメージをビルドするスクリプト。
 // スクリプトを用意するほどではないが、プライベートスクリプトと同じ場所に置くことで利用場面に想定があることを暗に示すための意味が強い。
 
-return await Paved.RunAsync(configuration: o => o.AnyPause(), action: async () =>
+return await Paved.RunAsync(config: o => o.AnyPause(), action: async () =>
 {
-    using var canceller = new CancellationTokenSource();
-    using var handler = ConsoleWig.CancelKeyHandlePeriod(canceller);
+    using var signal = ConsoleWig.CreateCancelKeyHandlePeriod();
 
     var composeFile = ThisSource.RelativeFile("docker-compose.yml");
-    await CmdProc.ExecAsync("docker", new[] { "compose", "--file", composeFile.FullName, "build", }, canceller.Token, stdOutWriter: Console.Out).AsSuccessCode();
+    await "docker".args("compose", "--file", composeFile.FullName, "build").cancelby(signal.Token).result().success();
 });

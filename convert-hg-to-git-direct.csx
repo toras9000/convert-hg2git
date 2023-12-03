@@ -1,7 +1,7 @@
 #nullable enable
-#r "nuget: Docker.DotNet, 3.125.14"
+#r "nuget: Docker.DotNet, 3.125.15"
 #r "nuget: Kurukuru, 1.4.2"
-#r "nuget: Lestaly, 0.37.0"
+#r "nuget: Lestaly, 0.51.0"
 using System.Formats.Tar;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
@@ -95,7 +95,7 @@ record ContainerContext(DockerClient Client, string ContainerId)
 }
 
 // メイン処理
-return await Paved.RunAsync(configuration: o => GC.KeepAlive(settings.NoPause ? o.NoPause() : o.AnyPause()), action: async () =>
+return await Paved.RunAsync(config: o => GC.KeepAlive(settings.NoPause ? o.NoPause() : o.AnyPause()), action: async () =>
 {
     // 出力エンコーディングを設定
     using var outenc = ConsoleWig.OutputEncodingPeriod(Encoding.UTF8);
